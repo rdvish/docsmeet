@@ -4,7 +4,7 @@ var socket = require('socket.io')
 
 var io = socket();
 
-const testFolder = 'C:/projects/docsmeet/project-files/reports/';
+const testFolder = path.join(__dirname, '..', 'reports');
 
 
 
@@ -21,7 +21,7 @@ io.on('connection',function(socket){
   socket.on('chat',function(data){
       io.sockets.emit('chat',data);
       let chatsm = data.handle+":"+data.message+"\n";
-      fs.appendFile('C:/projects/docsmeet/project-files/chats/chatMeet.txt', chatsm, (err) => {
+      fs.appendFile(path.join(__dirname, '..', 'chats/chatMeet.txt'), chatsm, (err) => {
 
           if (err) throw err;
       })
