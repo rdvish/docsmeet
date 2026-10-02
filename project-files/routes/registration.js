@@ -63,7 +63,7 @@ router.post('/registration', function(req, res, next) {
 
     //users=user_id	salutation	f_name	l_name	email	user_role
 
-        connection.query('INSERT INTO users (salutation, f_name, l_name, email, user_role) VALUES (?,?,?,?,"user")', [sal,fname,lname,mail], function(err, rows) {
+        connection.query('INSERT INTO users (salutation, f_name, l_name, email, user_role) VALUES (?,?,?,?,?)', [sal,fname,lname,mail,'user'], function(err, rows) {
 
             if(err) throw err
 
