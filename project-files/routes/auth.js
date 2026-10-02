@@ -12,18 +12,43 @@ var cookieParser = require('cookie-parser');
 
 var connection  = require('../lib/db');
 
+const query = (sql, params) =>
+  new Promise((resolve, reject) =>
+    connection.query(sql, params, (err, rows) => (err ? reject(err) : resolve(rows))));
+
 const { io } = require("socket.io-client");
 
 var flash = require('express-flash');
 
 //vishweshwar imports
-const {resolve} = require('path');
+const multer = require('multer');
+const path = require('path');
 var bodyParser = require('body-parser');
+
+const fs = require('fs');
+
+const uploadDir = path.resolve('./uploads');          // same ./uploads folder your old code used
+fs.mkdirSync(uploadDir, { recursive: true });    // creates it if it doesn't exist
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: function (req, file, cb) { cb(null, uploadDir); },
+    filename: function (req, file, cb) {
+      const safe = path.basename(file.originalname).replace(/[^\w.\-]/g, '_');
+      cb(null, Date.now() + '-' + safe);
+    }
+  }),
+  limits: { fileSize: 10 * 1024 * 1024, files: 10 },
+  fileFilter: function (req, file, cb) { cb(null, /^image\//.test(file.mimetype)); }
+});
+
+
 
 
 //global vars
 let userid=0;
 let meetingid=0;
+let meetid;
 let hosts=[];
 let partuid=[];
 let couid=[];
@@ -49,7 +74,7 @@ router.use(session({
 
 router.use(flash());
 router.use(cookieParser());
-router.use('/reports',express.static("/home/vibhav/Desktop/docsMeet/reports"));
+router.use('/reports',express.static("C:/projects/docsmeet/project-files/reports"));
 
 ///
 // parse application/json
@@ -71,17 +96,94 @@ function randomString(len, charSet) {
 }
 
 // homepage data upload done by vish
-router.post('/next',(req, res, next) => {
-   
-    let files=[];
-    files=req.body.files;
-    console.log(files);
-    let absolutePath=[];
-    for(let i=0;i<files.length;++i){
-       absolutePath += resolve('./uploads/'+files[i])+"\n";
+router.post('/next', upload.array('files', 10), async (req, res, next) => {
+  try {
+    console.log('BODY:', req.body);
+    console.log('FILES:', req.files);
+
+    // a single value arrives as a string, so always turn it into an array
+    const cohostList = [].concat(req.body.cohost || []);
+    const partList   = [].concat(req.body.part   || []);
+
+    const newabspath = (req.files || []).map(function (f) { return f.path; });
+    const link       = randomString(3) + "-" + randomString(3);
+    const emailserv  = req.body.email;
+
+    // hosts = co-hosts + the meeting creator (no duplicates)
+    const hosts = Array.from(new Set(cohostList.concat([emailserv])));
+    console.log(hosts);
+    console.log("emailserv", emailserv);
+
+    // local to this request, so they start empty every time
+    const couid   = [];
+    const partuid = [];
+
+    // 1. host's user id
+    const result = await query("SELECT user_id FROM users WHERE email=?", [emailserv]);
+    if (result.length === 0) {
+      return res.status(400).json({ error: "No user found for " + emailserv });
     }
-    let newabspath=absolutePath.split('\n');
- 
+    const userid = result[0].user_id;
+    console.log("userid:", userid);
+
+    // 2. user ids of hosts
+    for (let i = 0; i < hosts.length; ++i) {
+      const rows = await query("SELECT user_id FROM users WHERE email=?", [hosts[i]]);
+      if (rows.length === 0) { console.log("Host not found:", hosts[i]); continue; }
+      couid.push(rows[0].user_id);
+    }
+
+    // 3. user ids of participants
+    for (let i = 0; i < partList.length; ++i) {
+      const rows = await query("SELECT user_id FROM users WHERE email=?", [partList[i]]);
+      if (rows.length === 0) { console.log("Participant not found:", partList[i]); continue; }
+      partuid.push(rows[0].user_id);
+    }
+    console.log(couid);
+    console.log(partuid);
+
+    for (let i = 0; i < newabspath.length; ++i) {
+      console.log(newabspath[i]);
+    }
+
+    // 4. insert into meetings table and use the id MySQL assigned
+    const meeting = await query(
+      "INSERT INTO meetings(link,meeting_host,meeting_time) VALUES (?,?,?)",
+      [link, userid, req.body.time]);
+    const meetid = meeting.insertId;
+    console.log("Meeting id:", meetid);
+
+    // 5. insert hosts
+    for (let i = 0; i < couid.length; ++i) {
+      await query("INSERT INTO participants(meeting_id,user_id,participant_role) VALUES (?,?,?)",
+                  [meetid, couid[i], "Host"]);
+    }
+
+    // 6. insert participants
+    for (let i = 0; i < partuid.length; ++i) {
+      await query("INSERT INTO participants(meeting_id,user_id,participant_role) VALUES (?,?,?)",
+                  [meetid, partuid[i], "participant"]);
+    }
+
+    // 7. insert uploaded file paths
+    for (let i = 0; i < newabspath.length; ++i) {
+      await query("INSERT INTO reports(meeting_id,file_owner,location) VALUES (?,?,?)",
+                  [meetid, userid, newabspath[i]]);
+    }
+
+    console.log({ link: link, meetingId: meetid });
+    res.redirect('/auth/meet');
+
+  } catch (err) {
+    console.error(err);
+    if (!res.headersSent) res.status(500).json({ error: err.message });
+  }
+});
+/*router.post('/next',upload.array('files', 10),(req, res, next) => {
+   console.log('BODY:', req.body);
+console.log('FILES:', req.files);
+  
+    let newabspath = (req.files || []).map(function (f) { return f.path; });
     let hostno=1;
     hostno+=(req.body.cohost).length;
     let link=randomString(3)+"-"+randomString(3);
@@ -92,29 +194,29 @@ router.post('/next',(req, res, next) => {
    
    hosts[hostno-1]=emailserv;
    console.log(hosts);
+   console.log("emailserv",emailserv);
     connection.query("SELECT * FROM users where email=?",[emailserv], function (err, result, fields) {
        // if any error while executing above query, throw error
        if (err) throw err;
        // if there is no error, you have the result
        // iterate for all the rows in result
-       Object.keys(result).forEach(function(key) {
-         var row = result[key];
-         userid=row.user_id; //use this if name u want to put in place of email , must assign a value first
-       });
+       userid = result[0].user_id; 
+       console.log("userid:", userid); 
      });
  
    connection.query("SELECT MAX(meeting_id) as maxid FROM participants ", function (err, resultss, fields) {
     
-    meetingid=resultss[0].maxid;
-    meetid=meetingid+1;
-    // if any error while executing above query, throw error
-    if (err) throw err;
-    
-  });
-  //meetingid=meetingid+1;
- console.log("Meeting id:",meetingid);
+        meetingid=resultss[0].maxid;
+        meetid=meetingid+1;
+         console.log("Meeting id1:",meetingid);
  
- console.log("Meeting id:",meetid);
+        console.log("Meeting id2:",meetid);
+        // if any error while executing above query, throw error
+        if (err) throw err;
+    });
+  //meetingid=meetingid+1;
+
+
    for(let i=0;i<(hosts).length;++i){
     connection.query("SELECT * FROM users where email=?",[hosts[i]], function (err, result, fields) {
        // if any error while executing above query, throw error
@@ -146,7 +248,7 @@ router.post('/next',(req, res, next) => {
     console.log(newabspath[i]);
  }
    //query to insert into meetings table
-    connection.query("INSERT INTO meetings(link,meeting_host,meeting_time) VALUES (?,?,?)",[link,hostno,req.body.time]);
+    connection.query("INSERT INTO meetings(link,meeting_host,meeting_time) VALUES (?,?,?)",[link,userid,req.body.time]);
    
    //query to insert hosts along with their corresponding user ids
    for(let i=0;i<couid.length;++i){
@@ -159,7 +261,7 @@ router.post('/next',(req, res, next) => {
     for(let i=0;i<(newabspath).length;++i){
        connection.query("INSERT INTO reports(meeting_id,file_owner,location) VALUES (?,?,?)",[meetid,userid,newabspath[i]]);
     }
- });
+ });*/
 
 
 

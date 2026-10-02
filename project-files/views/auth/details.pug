@@ -324,6 +324,10 @@ script.
   });
   var json = JSON.stringify(object);
   fetch('/auth/next', {body: json, method: 'post', headers: {"Content-Type": "application/json"}})
+  .then(function (res) {
+    window.location.href = '/auth/meet';
+  })
+  .catch(function (err) { console.error(err); });
   //var http = new XMLHttpRequest();
   //http.open('POST', '/auth/next');
   //http.send(formdata);

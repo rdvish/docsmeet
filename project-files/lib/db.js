@@ -1,12 +1,12 @@
-var mysql=require('mysql');
+var mysql=require('mysql2');
 
  var connection=mysql.createConnection({
 
    host:'localhost',
 
-   user:'root',
+   user:'vish',
 
-   password:'pl406LAB',
+   password:'vish',
 
    database:'docsmeet'
 
